@@ -8,6 +8,8 @@
 #include <openssl/ec.h>
 #include <openssl/err.h>
 #include <openssl/sha.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
 
 NS_LOG_COMPONENT_DEFINE ("NPGpsrPacket");
 
@@ -115,6 +117,7 @@ HelloHeader::HelloHeader (uint64_t originPosx, uint64_t originPosy, ECDSA_SIG* s
     m_originPosy (originPosy),
     m_signature (signature),
     m_possignature (possignature)
+    m_comment (false) //コメントの有無
 {
 }
 
@@ -187,23 +190,31 @@ HelloHeader::Serialize (Buffer::Iterator i) const
   }
   OPENSSL_free(sig_ptrpos);*/
 
-  const BIGNUM *r, *s;
+  unsigned char* IpSignature = GetSignature();
+  unsigned char* PosSignature = GetSignaturePOS();
 
-  // Write first signature
-  ECDSA_SIG_get0(m_signature, &r, &s);
-  unsigned char r_bin[32];
-  unsigned char s_bin[32];
-  BN_bn2bin(r, r_bin);
-  BN_bn2bin(s, s_bin);
-  i.Write(r_bin, 32);
-  i.Write(s_bin, 32);
+  // ------------------------------------------------------↓出力
+  if(m_comment){
+    std::cout << "シリアライズ Packet:  POS Signature is: " << std::endl;
+    for (size_t i = 0; i < 64; i++) {
+      if (i == 0) {
+        std::cout << "IP signature r: "<< std::endl;
+      } else if (i == 32) {
+        std::cout << "IP signature s: "<< std::endl;
+      }
+      // 各バイトを16進数で表示
+      std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)possignature[i] << " ";
+      
+      // 16バイトごとに改行
+      if ((i + 1) % 16 == 0) {
+        std::cout << std::endl;
+      }
+    }
+  }
+  // -----------------------------------------------------↑
 
-  // Write second signature
-  ECDSA_SIG_get0(m_possignature, &r, &s);
-  BN_bn2bin(r, r_bin);
-  BN_bn2bin(s, s_bin);
-  i.Write(r_bin, 32);
-  i.Write(s_bin, 32);
+  i.Write(IpSignature, 64);  // 署名データの内容を書き込む
+  i.Write(PosSignature, 64);  // 2つ目の署名をシリアライズ
 
 }
 
@@ -243,21 +254,18 @@ HelloHeader::Deserialize (Buffer::Iterator start)
   m_possignature = d2i_ECDSA_SIG(NULL, &sig_ptr_copypos, sig_lenpos);
   free(sig_ptrpos);*/
 
-  // Read first signature
-  unsigned char r_bin[32];
-  unsigned char s_bin[32];
-  i.Read(r_bin, 32);
-  i.Read(s_bin, 32);
-  m_signature = ECDSA_SIG_new();
-  ECDSA_SIG_set0(m_signature, BN_bin2bn(r_bin, 32, NULL), BN_bin2bn(s_bin, 32, NULL));
-  SetSignature(m_signature);
+  // nagano
+  unsigned char* IpSignature = nullptr;
+  unsigned char* PosSignature = nullptr;
+  IpSignature = new unsigned char[64];
+  PosSignature = new unsigned char[64];
+  // Read first signature (64 bytes for Ed25519 signature)
+  i.Read(IpSignature, 64); // 読み込んだら次の64bytesに移動する.署名の内容をポインタが指す配列に格納
+  SetSignature (IpSignature); // 署名を格納
 
-  // Read second signature
-  i.Read(r_bin, 32);
-  i.Read(s_bin, 32);
-  m_possignature = ECDSA_SIG_new();
-  ECDSA_SIG_set0(m_possignature, BN_bin2bn(r_bin, 32, NULL), BN_bin2bn(s_bin, 32, NULL));
-  SetSignaturePOS(m_possignature);
+  // Read second signature (64 bytes for Ed25519 signature)
+  i.Read(PosSignature, 64);  // 64bytesの署名を読み込む
+  SetSignaturePOS (PosSignature); // 署名を格納
 
   uint32_t dist = i.GetDistanceFrom (start);
   NS_ASSERT (dist == GetSerializedSize ());

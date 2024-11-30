@@ -202,25 +202,50 @@ RoutingHelper::ConfigureRoutingProtocol (NodeContainer& c)
   else if(m_protocolName=="NPGPSR"){
     //ECDSA
     //鍵生成（IP)
-    EC_KEY* ecKey_ip = EC_KEY_new_by_curve_name(NID_secp256k1);//ECキー生成　IPアドレスに関するECキー
-    if (ecKey_ip == nullptr)
-    {
-      std::cerr << "Failed to create EC key" << std::endl;
+    EVP_PKEY_CTX* ecdsaCtx_ip = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr); // 鍵生成コンテキスト
+    EVP_PKEY* ecKey_ip = nullptr; // ECDSA鍵生成
+    if (ecdsaCtx_ip == nullptr || EVP_PKEY_keygen_init(ecdsaCtx_ip) != 1) {
+        std::cerr << "Failed to create ECDSA key context for IP" << std::endl;
+        EVP_PKEY_CTX_free(ecdsaCtx_ip); // メモリ解放
+        return;
     }
-    if (EC_KEY_generate_key(ecKey_ip) != 1)//公開鍵、秘密鍵ペア生成
-    {
-      std::cerr << "Failed to generate EC key pair" << std::endl;
+    // 曲線を指定 (secp256k1)
+    if (EVP_PKEY_CTX_set_ec_paramgen_curve_nid(ecdsaCtx_ip, NID_secp256k1) != 1) {
+        std::cerr << "Failed to set EC curve for ECDSA" << std::endl;
+        EVP_PKEY_CTX_free(ecdsaCtx_ip); // メモリ解放
+        return;
     }
+    // 鍵ペアの生成
+    if (EVP_PKEY_keygen(ecdsaCtx_ip, &ecKey_ip) != 1) {
+        std::cerr << "Failed to generate ECDSA key pair" << std::endl;
+        EVP_PKEY_CTX_free(ecdsaCtx_ip); // メモリ解放
+        return;
+    }
+    // コンテキストの解放
+    EVP_PKEY_CTX_free(ecdsaCtx_ip);
+
     //鍵生成（位置)
-    EC_KEY* ecKey_pos = EC_KEY_new_by_curve_name(NID_secp256k1);//ECキー生成 位置情報に関するECキー
-    if (ecKey_pos == nullptr)
-    {
-      std::cerr << "Failed to create EC key" << std::endl;
+    EVP_PKEY_CTX* ecdsaCtx_pos = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr); // 鍵生成コンテキスト
+    EVP_PKEY* ecKey_pos = nullptr; // ECDSA鍵生成
+    if (ecdsaCtx_pos == nullptr || EVP_PKEY_keygen_init(ecdsaCtx_pos) != 1) {
+        std::cerr << "Failed to create ECDSA key context for POS" << std::endl;
+        EVP_PKEY_CTX_free(ecdsaCtx_pos); // メモリ解放
+        return;
     }
-    if (EC_KEY_generate_key(ecKey_pos) != 1)//公開鍵、秘密鍵ペア生成　
-    {
-      std::cerr << "Failed to generate EC key pair" << std::endl;
+    // 曲線を指定 (secp256k1)
+    if (EVP_PKEY_CTX_set_ec_paramgen_curve_nid(ecdsaCtx_pos, NID_secp256k1) != 1) {
+        std::cerr << "Failed to set EC curve for ECDSA" << std::endl;
+        EVP_PKEY_CTX_free(ecdsaCtx_pos); // メモリ解放
+        return;
     }
+    // 鍵ペアの生成
+    if (EVP_PKEY_keygen(ecdsaCtx_pos, &ecKey_pos) != 1) {
+        std::cerr << "Failed to generate ECDSA key pair" << std::endl;
+        EVP_PKEY_CTX_free(ecdsaCtx_pos); // メモリ解放
+        return;
+    }
+    // コンテキストの解放
+    EVP_PKEY_CTX_free(ecdsaCtx_pos);
 
     npgpsr.SetDsaParameterIP(ecKey_ip); //IPアドレス署名用のパラメーター
     npgpsr.SetDsaParameterPOS(ecKey_pos);
@@ -297,7 +322,7 @@ RoutingHelper::ConfigureRoutingProtocol (NodeContainer& c)
     if (edCtx_ip == nullptr || EVP_PKEY_keygen_init(edCtx_ip) != 1) {
       std::cerr << "Failed to create Ed key context for IP" << std::endl;
     }
-    if (EVP_PKEY_keygen(edCtx_ip, &edKey_ip) != 1) { // 
+    if (EVP_PKEY_keygen(edCtx_ip, &edKey_ip) != 1) {
       std::cerr << "Failed to generate Ed key pair" << std::endl;
     }
     EVP_PKEY_CTX_free(edCtx_ip); // メモリの解放

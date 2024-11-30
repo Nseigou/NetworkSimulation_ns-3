@@ -804,6 +804,7 @@ RoutingProtocol::RecvNDGPSR (Ptr<Socket> socket)
                 durationIp = endIp - startIp;
                 sumVeriIpSigTime += durationIp.count() * 1000000;
                 cntVeriIpSig ++;
+
                 // pos時間計測開始
                 auto startPos = std::chrono::high_resolution_clock::now();
                  // 位置情報のXとYを連結してハッシュに通す
@@ -812,7 +813,6 @@ RoutingProtocol::RecvNDGPSR (Ptr<Socket> socket)
                 std::string combined_position = positionX_str + positionY_str;
                 unsigned char digest1[SHA256_DIGEST_LENGTH];//ハッシュ値計算
                 SHA256(reinterpret_cast<const unsigned char*>(combined_position.c_str()), combined_position.length(), digest1);
-
 
                 if (verify_signature(edKeypos, digest1, SHA256_DIGEST_LENGTH, hdr.GetSignaturePOS(), 64))
                 {
@@ -825,6 +825,7 @@ RoutingProtocol::RecvNDGPSR (Ptr<Socket> socket)
                         durationPos = endPos - startPos;
                         sumVeriPosSigTime += durationPos.count() * 1000000;
                         cntVeriPosSig ++;
+                        
                         //近隣ノードの情報更新
                         UpdateRouteToNeighbor (sender, receiver, Position);
                 }
@@ -1045,7 +1046,7 @@ RoutingProtocol::HelloTimerExpire ()
         EVP_MD_CTX_free(md_ctx_ip);
         return;
         }
-        // 署名のコンテキスト作成と初期化(IP)
+        // 署名のコンテキスト作成と初期化(POs)
         EVP_MD_CTX *md_ctx_pos = EVP_MD_CTX_new();
         if (!md_ctx_pos) {
         std::cerr << "Failed to create MD context" << std::endl;
@@ -1101,18 +1102,18 @@ RoutingProtocol::SendHello (EVP_MD_CTX *md_ctx_ip, EVP_MD_CTX *md_ctx_pos)
         std::string protocolName = "NDGPSR";
         unsigned char digest[SHA256_DIGEST_LENGTH];//ハッシュ値計算
         SHA256(reinterpret_cast<const unsigned char*>(protocolName.c_str()), protocolName.length(), digest);
-
+        // 署名データを格納するためのメモリ確保
         signature = reinterpret_cast<unsigned char*>(OPENSSL_malloc(sig_len));
         if (signature == nullptr) {
-        std::cerr << "Failed to allocate memory for signature" << std::endl;
-        EVP_MD_CTX_free(md_ctx_ip);
-        return;
+                std::cerr << "Failed to allocate memory for signature" << std::endl;
+                EVP_MD_CTX_free(md_ctx_ip);
+                return;
         }
         // 署名を作成 (初期化されたコンテキストにデータを追加し、署名を生成)
         if (EVP_DigestSign(md_ctx_ip, signature, &sig_len, digest, SHA256_DIGEST_LENGTH) <= 0) {
-        std::cerr << "Failed to get signature" << std::endl;
-        EVP_MD_CTX_free(md_ctx_ip);
-        return;
+                std::cerr << "Failed to get signature" << std::endl;
+                EVP_MD_CTX_free(md_ctx_ip);
+                return;
         }
 
         // 時間計測終了
@@ -1153,9 +1154,9 @@ RoutingProtocol::SendHello (EVP_MD_CTX *md_ctx_ip, EVP_MD_CTX *md_ctx_pos)
         possignature = reinterpret_cast<unsigned char*>(OPENSSL_malloc(sig_len));
         // 署名を作成 (初期化されたコンテキストにデータを追加し、署名を生成)
         if (EVP_DigestSign(md_ctx_pos, possignature, &sig_len, digest1, SHA256_DIGEST_LENGTH) != 1) {
-        std::cerr << "Failed to get possignature" << std::endl;
-        EVP_MD_CTX_free(md_ctx_pos);
-        return;
+                std::cerr << "Failed to get possignature" << std::endl;
+                EVP_MD_CTX_free(md_ctx_pos);
+                return;
         }
 
         // 時間計測終了
