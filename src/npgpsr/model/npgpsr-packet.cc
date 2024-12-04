@@ -112,13 +112,19 @@ operator<< (std::ostream & os, TypeHeader const & h)
 //-----------------------------------------------------------------------------
 // HELLO
 //-----------------------------------------------------------------------------
-HelloHeader::HelloHeader (uint64_t originPosx, uint64_t originPosy, ECDSA_SIG* signature, ECDSA_SIG* possignature)
+HelloHeader::HelloHeader (uint64_t originPosx, uint64_t originPosy, unsigned int* signature, unsigned int ip_sig_len, unsigned int* possignature, unsigned int pos_sig_len)
   : m_originPosx (originPosx),
     m_originPosy (originPosy),
-    m_signature (signature),
-    m_possignature (possignature)
+    m_ipsiglen (ip_sig_len),
+    m_possiglen (pos_sig_len),
     m_comment (false) //コメントの有無
 {
+    if (signature != nullptr) {
+      memcpy(m_signature, signature, ip_sig_len);
+    }
+    if (possignature != nullptr) {
+      memcpy(m_possignature, possignature, pos_sig_len);
+    }
 }
 
 NS_OBJECT_ENSURE_REGISTERED (HelloHeader);
@@ -142,6 +148,9 @@ HelloHeader::GetInstanceTypeId () const
 uint32_t
 HelloHeader::GetSerializedSize () const
 {
+  // nagano---------------------------------------↓
+
+  return 16 + 4 + m_ipsiglen + 4 + m_possiglen;
   /*//追加
   unsigned char *sig_ptr = NULL;
   int sig_len_temp = i2d_ECDSA_SIG(m_signature, &sig_ptr);
@@ -154,7 +163,7 @@ HelloHeader::GetSerializedSize () const
   OPENSSL_free(sig_ptrpos);*/
 
   //return 16 + 4 + sig_len + 4 + sig_lenpos;
-  return 16 + (2*64);
+  // return 16 + (2*64);
   //return 16;
 }
 
@@ -189,32 +198,18 @@ HelloHeader::Serialize (Buffer::Iterator i) const
       i.WriteU8 (static_cast<uint8_t>(sig_ptrpos[k]));
   }
   OPENSSL_free(sig_ptrpos);*/
-
-  unsigned char* IpSignature = GetSignature();
-  unsigned char* PosSignature = GetSignaturePOS();
-
   // ------------------------------------------------------↓出力
   if(m_comment){
     std::cout << "シリアライズ Packet:  POS Signature is: " << std::endl;
-    for (size_t i = 0; i < 64; i++) {
-      if (i == 0) {
-        std::cout << "IP signature r: "<< std::endl;
-      } else if (i == 32) {
-        std::cout << "IP signature s: "<< std::endl;
-      }
-      // 各バイトを16進数で表示
-      std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)possignature[i] << " ";
-      
-      // 16バイトごとに改行
-      if ((i + 1) % 16 == 0) {
-        std::cout << std::endl;
-      }
-    }
   }
   // -----------------------------------------------------↑
 
   i.Write(IpSignature, 64);  // 署名データの内容を書き込む
   i.Write(PosSignature, 64);  // 2つ目の署名をシリアライズ
+  i.WriteHtonU32 (m_ipsiglen); // 32bit(4バイト)の整数（IP署名の長さ）を書き込む
+  i.Write(m_signature, m_ipsiglen);
+  i.WriteHtonU32 (m_possiglen);
+  i.Write(m_possignature, m_possiglen);
 
 }
 
@@ -255,17 +250,11 @@ HelloHeader::Deserialize (Buffer::Iterator start)
   free(sig_ptrpos);*/
 
   // nagano
-  unsigned char* IpSignature = nullptr;
-  unsigned char* PosSignature = nullptr;
-  IpSignature = new unsigned char[64];
-  PosSignature = new unsigned char[64];
-  // Read first signature (64 bytes for Ed25519 signature)
-  i.Read(IpSignature, 64); // 読み込んだら次の64bytesに移動する.署名の内容をポインタが指す配列に格納
-  SetSignature (IpSignature); // 署名を格納
 
-  // Read second signature (64 bytes for Ed25519 signature)
-  i.Read(PosSignature, 64);  // 64bytesの署名を読み込む
-  SetSignaturePOS (PosSignature); // 署名を格納
+  m_ipsiglen = start.ReadNtohU32();
+  start.Read(m_signature, m_ipsiglen);
+  m_possiglen = start.ReadNtohU32();
+  start.Read(m_possignature, m_possiglen);
 
   uint32_t dist = i.GetDistanceFrom (start);
   NS_ASSERT (dist == GetSerializedSize ());

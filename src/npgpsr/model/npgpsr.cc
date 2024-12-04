@@ -729,8 +729,8 @@ RoutingProtocol::RecvNPGPSR (Ptr<Socket> socket)
         //ECキー生成
         std::string protocolName = "NPGPSR";
         std::string traceFile = Gettracefile();
-        EVP_PKEY* edKey_ip = GetDsaParameterIP();
-        EVP_PKEY* edKey_pos = GetDsaParameterPOS();
+        EVP_PKEY* ecKey_ip = GetDsaParameterIP();
+        EVP_PKEY* ecKey_pos = GetDsaParameterPOS();
 
         // 関数の定義
         auto verify_signature = [](EVP_PKEY* key, const unsigned char* message, size_t message_len, const unsigned char* new_signature, size_t sig_len) -> bool {
@@ -753,7 +753,7 @@ RoutingProtocol::RecvNPGPSR (Ptr<Socket> socket)
         // 出力--------------------------------------------------------↓
         if(m_comment){
                 std::cout << "Verification POS Signature is: " << std::endl;
-                for (size_t i = 0; i < 64; i++) {
+                for (unsigned int i = 0; i < ip_sig_len; i++) {
                         // 各バイトを16進数で表示
                         std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)hdr.GetSignaturePOS()[i] << " ";
                         
@@ -777,7 +777,7 @@ RoutingProtocol::RecvNPGPSR (Ptr<Socket> socket)
         SHA256(reinterpret_cast<const unsigned char*>(protocolName.c_str()), protocolName.length(), digest);
 
         //署名検証
-        if (verify_signature(edKey, digest, SHA256_DIGEST_LENGTH, hdr.GetSignature(), 64))//署名検証　成功時１
+        if (verify_signature(ecKey, digest, SHA256_DIGEST_LENGTH, hdr.GetSignature(), hdr.GetSignatureLengthIP()))//署名検証　成功時１
         {
                 // 時間計測終了
                 auto endIp = std::chrono::high_resolution_clock::now();
@@ -794,7 +794,7 @@ RoutingProtocol::RecvNPGPSR (Ptr<Socket> socket)
                 unsigned char digest1[SHA256_DIGEST_LENGTH];//ハッシュ値計算(位置)
                 SHA256(reinterpret_cast<const unsigned char*>(combined_position.c_str()), combined_position.length(), digest1);
 
-                if (verify_signature(edKeypos, digest1, SHA256_DIGEST_LENGTH, hdr.GetSignaturePOS(), 64))
+                if (verify_signature(ecKeypos, digest1, SHA256_DIGEST_LENGTH, hdr.GetSignaturePOS(), hdr.GetSignatureLengthPOS()))
                 {
                         if(m_comment){
                                 std::cerr << "ECDSA signature verification succeeded" << std::endl;
@@ -825,22 +825,6 @@ RoutingProtocol::RecvNPGPSR (Ptr<Socket> socket)
         if(m_comment){
                 std::cout << "署名検証時間 (IP): " << durationIp.count() * 1000000 << " μ s" << std::endl;
                 std::cout << "署名検証時間 (位置): " << durationPos.count() * 1000000 << " μ s" << std::endl;
-                
-                // r と s を表示
-                for (size_t i = 0; i < 64; i++) {
-                        if (i == 0) {
-                                std::cout << "VeriSig: IP signature r: "<< std::endl;
-                        } else if (i == 32) {
-                                std::cout << "VeriSig: IP signature s: "<< std::endl;
-                        }
-                        // 各バイトを16進数で表示
-                        std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)possignature[i] << " ";
-                        
-                        // 16バイトごとに改行
-                        if ((i + 1) % 16 == 0) {
-                        std::cout << std::endl;
-                        }
-                }
         }
         // 出力-------------------------------------------------------------------↑
 
@@ -1028,8 +1012,8 @@ void
 RoutingProtocol::HelloTimerExpire ()
 {
         // 鍵の取得
-        EVP_PKEY* edKey_ip = GetDsaParameterIP();
-        EVP_PKEY* edKey_pos = GetDsaParameterPOS();
+        EVP_PKEY* ecKey_ip = GetDsaParameterIP();
+        EVP_PKEY* ecKey_pos = GetDsaParameterPOS();
         // 署名のコンテキスト作成と初期化(IP)
         // 署名のコンテキストを作成
         EVP_MD_CTX *md_ctx_ip = EVP_MD_CTX_new();
@@ -1038,7 +1022,7 @@ RoutingProtocol::HelloTimerExpire ()
         return;
         }
         // 署名の初期化 (鍵の設定)
-        if (EVP_DigestSignInit(md_ctx_ip, NULL, EVP_sha256(), NULL, edKey_ip) <= 0) {
+        if (EVP_DigestSignInit(md_ctx_ip, NULL, EVP_sha256(), NULL, ecKey_ip) <= 0) {
         std::cerr << "Failed to initialize DigestSign" << std::endl;
         EVP_MD_CTX_free(md_ctx_ip);
         return;
@@ -1051,7 +1035,7 @@ RoutingProtocol::HelloTimerExpire ()
         }
 
         // 署名の初期化 (鍵の設定)
-        if (EVP_DigestSignInit(md_ctx_pos, NULL, EVP_sha256(), NULL, edKey_pos) <= 0) {
+        if (EVP_DigestSignInit(md_ctx_pos, NULL, EVP_sha256(), NULL, ecKey_pos) <= 0) {
         std::cerr << "Failed to initialize DigestSign" << std::endl;
         EVP_MD_CTX_free(md_ctx_pos);
         return;
@@ -1083,42 +1067,56 @@ RoutingProtocol::SendHello (EVP_MD_CTX *md_ctx_ip, EVP_MD_CTX *md_ctx_pos)
         // ECDSA
         unsigned char *signature = nullptr; 
         unsigned char *possignature = nullptr;
-        size_t sig_len = 64; // 署名サイズは64バイト
+        unsigned int ip_sig_len;
+        unsigned int pos_sig_len;
 
         // 時間計測開始
-        auto startIp = std::chrono::high_resolution_clock::now();
+        auto startIpHash = std::chrono::high_resolution_clock::now();
 
         //署名生成（IP)
         std::string protocolName = "NPGPSR";
         unsigned char digest[SHA256_DIGEST_LENGTH];//ハッシュ値計算
         SHA256(reinterpret_cast<const unsigned char*>(protocolName.c_str()), protocolName.length(), digest);
+
+        // 処理の計測時間をNGDPSRと同じ条件にするため
+        auto endIpHash = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> durationIpHash = endIpHash - startIpHash;
+
+        // 署名データを格納するためのメモリを計算
+        if (EVP_DigestSign(md_ctx_ip, nullptr, &ip_sig_len, digest, SHA256_DIGEST_LENGTH) <= 0) {
+        std::cerr << "Failed to calculate ip signature size" << std::endl;
+        EVP_MD_CTX_free(md_ctx_ip);
+        return;
+        }
+
+        auto startIp = std::chrono::high_resolution_clock::now();
+
         // 署名データを格納するためのメモリ確保
-        signature = reinterpret_cast<unsigned char*>(OPENSSL_malloc(sig_len));
+        signature = reinterpret_cast<unsigned char*>(OPENSSL_malloc(ip_sig_len));
         if (signature == nullptr) {
                 std::cerr << "Failed to allocate memory for IP signature" << std::endl;
                 EVP_MD_CTX_free(md_ctx_ip);
                 return;
         }
          // 署名を生成
-        if (EVP_DigestSign(mdCtx_ip, signature, &sig_len, digest, SHA256_DIGEST_LENGTH) <= 0) {
+        if (EVP_DigestSign(mdCtx_ip, signature, &ip_sig_len, digest, SHA256_DIGEST_LENGTH) <= 0) {
                 std::cerr << "Failed to generate IP ECDSA signature" << std::endl;
                 OPENSSL_free(signature);
                 EVP_MD_CTX_free(mdCtx_ip);
-                EVP_PKEY_free(ecKey_ip);
                 return;
         }
          // 時間計測終了
         auto endIp = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double> durationIp = endIp - startIp;
+        std::chrono::duration<double> durationIp = endIp - startIp + durationIpHash;
         sumGeneIpSigTime += durationIp.count() * 1000000;
         cntGeneIpSig ++;
 
         // メモリの解放
         EVP_MD_CTX_free(md_ctx_ip);
 
-
          // 時間計測開始
-        auto startPos = std::chrono::high_resolution_clock::now();
+        auto startPosHash = std::chrono::high_resolution_clock::now();
+
         // 署名生成（位置)
         std::string positionX_str = std::to_string(positionX);
         std::string positionY_str = std::to_string(positionY);
@@ -1126,9 +1124,27 @@ RoutingProtocol::SendHello (EVP_MD_CTX *md_ctx_ip, EVP_MD_CTX *md_ctx_pos)
         unsigned char digest1[SHA256_DIGEST_LENGTH];//ハッシュ値計算
         SHA256(reinterpret_cast<const unsigned char*>(combined_position.c_str()), combined_position.length(), digest1);
 
-        possignature = reinterpret_cast<unsigned char*>(OPENSSL_malloc(sig_len));
+        // 処理の計測時間をNGDPSRと同じ条件にするため
+        auto endPosHash = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> durationPosHash = endPosHash - startPosHash;
+
+        // 署名データを格納するためのメモリを計算
+        if (EVP_DigestSign(md_ctx_pos, nullptr, &pos_sig_len, digest1, SHA256_DIGEST_LENGTH) <= 0) {
+                std::cerr << "Failed to calculate pos signature size" << std::endl;
+                EVP_MD_CTX_free(md_ctx_pos);
+                return;
+        }
+
+        auto startPos = std::chrono::high_resolution_clock::now();
+
+        possignature = reinterpret_cast<unsigned char*>(OPENSSL_malloc(pos_sig_len));
+        if (signature == nullptr) {
+                std::cerr << "Failed to allocate memory for IP signature" << std::endl;
+                EVP_MD_CTX_free(md_ctx_pos);
+                return;
+        }
         // 署名を作成 (初期化されたコンテキストにデータを追加し、署名を生成)
-        if (EVP_DigestSign(md_ctx_pos, possignature, &sig_len, digest1, SHA256_DIGEST_LENGTH) != 1) {
+        if (EVP_DigestSign(md_ctx_pos, possignature, &pos_sig_len, digest1, SHA256_DIGEST_LENGTH) != 1) {
                 std::cerr << "Failed to get possignature" << std::endl;
                 EVP_MD_CTX_free(md_ctx_pos);
                 return;
@@ -1136,7 +1152,7 @@ RoutingProtocol::SendHello (EVP_MD_CTX *md_ctx_ip, EVP_MD_CTX *md_ctx_pos)
 
         // 時間計測終了
         auto endPos = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double> durationPos = endPos - startPos;
+        std::chrono::duration<double> durationPos = endPos - startPos + durationPosHash;
         sumGenePosSigTime += durationPos.count() * 1000000;
         cntGenePosSig ++;
         // 出力-----------------------------------------------------------------↓
@@ -1144,13 +1160,10 @@ RoutingProtocol::SendHello (EVP_MD_CTX *md_ctx_ip, EVP_MD_CTX *md_ctx_pos)
                 std::cout << "署名生成時間 (IP): " << durationIp.count() * 1000000 << " μ s" << std::endl;
                 std::cout << "署名生成時間 (位置): " << durationPos.count() * 1000000 << " μ s" << std::endl;
                 uint64_t nodeId = m_ipv4->GetObject<Node> ()->GetId ();
+                std::cout << "Node" << nodeId << ": 署名生成 : IP signatureLength" << ipsiglen << std::endl;
+                std::cout << "Node" << nodeId << ": 署名生成 : POS signatureLength" << possiglen << std::endl;
                 std::cout << "Node" << nodeId << ": success to create POS signature" << std::endl;
-                for (size_t i = 0; i < 64; i++) {
-                        if (i == 0) {
-                                std::cout << "GeneSig: IP signature r: "<< std::endl;
-                        } else if (i == 32) {
-                                std::cout << "GeneSig: IP signature s: "<< std::endl;
-                        }
+                for (unsigned int i = 0; i < pos_sig_len; i++) {
                         // 各バイトを16進数で表示
                         std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)possignature[i] << " ";
                         
@@ -1228,8 +1241,11 @@ RoutingProtocol::SendHello (EVP_MD_CTX *md_ctx_ip, EVP_MD_CTX *md_ctx_pos)
                         socket->SendTo (packet, 0, InetSocketAddress (destination, NPGPSR_PORT));
                 }
                 else{*/
-                        HelloHeader helloHeader (((uint64_t) positionX),((uint64_t) positionY), signature, possignature);
-
+                        HelloHeader helloHeader (((uint64_t) positionX),((uint64_t) positionY), signature, ip_sig_len possignature, pos_sig_len);
+                        if(m_comment){
+                                std::cout << "Node" << nodeId << ": Hello : IP signatureLength" << ipsiglen << std::endl;
+                                std::cout << "Node" << nodeId << ": Hello : POS signatureLength" << possiglen << std::endl;
+                        }
                         Ptr<Packet> packet = Create<Packet> ();
                         packet->AddHeader (helloHeader);
                         TypeHeader tHeader (NPGPSRTYPE_HELLO);

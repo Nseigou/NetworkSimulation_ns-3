@@ -70,7 +70,7 @@ class HelloHeader : public Header
 {
 public:
   /// c-tor
-  HelloHeader (uint64_t originPosx = 0, uint64_t originPosy = 0, ECDSA_SIG* signature = nullptr, ECDSA_SIG* possignature = nullptr);
+  HelloHeader (uint64_t originPosx = 0, uint64_t originPosy = 0, unsigned int* signature = nullptr, unsigned int ip_sig_len, unsigned int* possignature = nullptr, unsigned int pos_sig_len);
 
   ///\name Header serialization/deserialization
   //\{
@@ -116,6 +116,23 @@ public:
   unsigned char* GetSignaturePOS() const{
     return m_possignature;
   }
+// nagano---------------------------------------↓
+  void SetSignatureLengthIP (unsigned int ip_sig_len)
+  {
+    m_ipsiglen = ip_sig_len;
+  } 
+  unsigned int GetSignatureLengthIP () const
+  {
+    return m_ipsiglen;
+  }
+  void SetSignatureLengthPOS (unsigned int pos_sig_len)
+  {
+    m_possiglen = pos_sig_len;
+  }
+  unsigned int GetSignatureLengthPOS () const
+  {
+    return m_possiglen;
+  }
 
 
 
@@ -127,7 +144,9 @@ private:
   uint64_t         m_originPosx;          ///< Originator Position x
   uint64_t         m_originPosy;          ///< Originator Position x
   unsigned char* m_signature;
+  unsigned int m_ipsiglen;
   unsigned char* m_possignature;
+  unsigned int m_possiglen;
   bool m_comment;
 };
 
